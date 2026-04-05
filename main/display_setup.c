@@ -1,5 +1,7 @@
 #include "display_setup.h"
 
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "driver/gpio.h"
@@ -78,6 +80,32 @@ static const lcd_cmd_t s_lcd_st7789v[] = {
 static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_panel_io_handle_t s_io;
 static lv_disp_drv_t s_disp_drv;
+
+#if SOC_LCD_I80_SUPPORTED
+static lv_obj_t *s_count_label;
+#endif
+
+static void async_set_count_text(void *user_data) {
+#if SOC_LCD_I80_SUPPORTED
+  int c = (int)(intptr_t)user_data;
+  char buf[48];
+  snprintf(buf, sizeof buf, "Presses: %d", c);
+  if (s_count_label) {
+    lv_label_set_text(s_count_label, buf);
+  }
+#endif
+}
+
+void display_set_pressed_count(int count) {
+#if SOC_LCD_I80_SUPPORTED
+  if (s_count_label == NULL) {
+    return;
+  }
+  lv_async_call(async_set_count_text, (void *)(intptr_t)count);
+#else
+  (void)count;
+#endif
+}
 
 static bool lvgl_on_flush_done(esp_lcd_panel_io_handle_t panel_io,
                                esp_lcd_panel_io_event_data_t *edata, void *user_ctx) {
@@ -227,9 +255,13 @@ void display_setup(void) {
   ESP_ERROR_CHECK(esp_timer_create(&tick_args, &tick));
   ESP_ERROR_CHECK(esp_timer_start_periodic(tick, (int64_t)LVGL_TICK_MS * 1000));
 
-  lv_obj_t *label = lv_label_create(lv_scr_act(), NULL);
-  lv_label_set_text(label, "Hello World");
-  lv_obj_align(label, NULL, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_t *title = lv_label_create(lv_scr_act(), NULL);
+  lv_label_set_text(title, "Button");
+  lv_obj_align(title, NULL, LV_ALIGN_IN_TOP_MID, 0, 8);
+
+  s_count_label = lv_label_create(lv_scr_act(), NULL);
+  lv_label_set_text(s_count_label, "Presses: 0");
+  lv_obj_align(s_count_label, NULL, LV_ALIGN_CENTER, 0, 0);
 
   xTaskCreate(lvgl_port_task, "lvgl", LVGL_TASK_STACK, NULL, LVGL_TASK_PRIO, NULL);
   ESP_LOGI(TAG, "T-Display S3 (I80 ST7789) ready %dx%d", LCD_H_RES, LCD_V_RES);

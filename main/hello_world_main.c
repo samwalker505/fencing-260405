@@ -41,9 +41,11 @@ void app_main(void) {
     int btn_state = gpio_get_level(BUTTON_PIN);
     gpio_set_level(LED_PIN, btn_state);
 
-    if (btn_state == 1 && last_btn_state == 0) {
+    /* Pull-up: released = 1, pressed (to GND) = 0 — count on press edge */
+    if (btn_state == 0 && last_btn_state == 1) {
       pressed_count++;
       printf("Pressed count: %d\n", pressed_count);
+      display_set_pressed_count(pressed_count);
     }
     last_btn_state = btn_state;
 
