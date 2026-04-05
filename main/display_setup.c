@@ -1,4 +1,5 @@
 #include "display_setup.h"
+#include "app_config.h"
 #include "walker_splash.h"
 
 #include <stdint.h>
@@ -91,6 +92,10 @@ static lv_obj_t *s_vis_btn_top;
 static lv_obj_t *s_vis_btn_bottom;
 static lv_obj_t *s_vis_btn_top_lbl;
 static lv_obj_t *s_vis_btn_bottom_lbl;
+#if defined(LV_USE_ARC) && LV_USE_ARC
+static lv_obj_t *s_speed_arc;
+static lv_obj_t *s_speed_avg_lbl;
+#endif
 
 static bool s_have_hw_vis;
 static bool s_last_hw_top;
@@ -247,6 +252,18 @@ void display_set_title_visible(bool visible) {
 #endif
 }
 
+#if SOC_LCD_I80_SUPPORTED && defined(LV_USE_ARC) && LV_USE_ARC
+static void speed_test_ui_hide_sync(void) {
+  if (s_speed_arc) {
+    lv_obj_set_hidden(s_speed_arc, true);
+  }
+  if (s_speed_avg_lbl) {
+    lv_label_set_text(s_speed_avg_lbl, "");
+    lv_obj_set_hidden(s_speed_avg_lbl, true);
+  }
+}
+#endif
+
 static void async_restore_standard(void *user_data) {
   (void)user_data;
 #if SOC_LCD_I80_SUPPORTED
@@ -254,6 +271,7 @@ static void async_restore_standard(void *user_data) {
   lv_obj_set_style_local_bg_color(scr, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE);
   lv_obj_set_style_local_bg_opa(scr, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_COVER);
   if (s_main_label) {
+    lv_obj_set_hidden(s_main_label, false);
     lv_label_set_long_mode(s_main_label, LV_LABEL_LONG_BREAK);
     lv_obj_set_width(s_main_label, LCD_H_RES - 24);
     lv_obj_set_style_local_text_color(s_main_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT,
@@ -327,6 +345,7 @@ static void async_training_view(void *user_data) {
     lv_obj_set_style_local_bg_color(scr, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_RED);
     lv_obj_set_style_local_bg_opa(scr, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_COVER);
     if (s_main_label) {
+      lv_obj_set_hidden(s_main_label, false);
       lv_label_set_long_mode(s_main_label, LV_LABEL_LONG_EXPAND);
       lv_obj_set_style_local_text_color(s_main_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT,
                                         LV_COLOR_WHITE);
@@ -345,6 +364,7 @@ static void async_training_view(void *user_data) {
     lv_obj_set_style_local_bg_color(scr, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE);
     lv_obj_set_style_local_bg_opa(scr, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_COVER);
     if (s_main_label) {
+      lv_obj_set_hidden(s_main_label, false);
       lv_label_set_long_mode(s_main_label, LV_LABEL_LONG_BREAK);
       lv_obj_set_width(s_main_label, LCD_H_RES - 24);
       lv_label_set_text(s_main_label, "Ready");
@@ -367,6 +387,262 @@ void display_set_training_view(bool hit_active) {
   (void)hit_active;
 #endif
 }
+
+#if SOC_LCD_I80_SUPPORTED && defined(LV_USE_ARC) && LV_USE_ARC
+
+/**
+ * Semicircular loader (∩ opening downward per sketch): BG track + INDIC progress, 0..target steps.
+ * LVGL angles: 0° = 3 o'clock; 180→360° is the upper semicircle (curve on top, opening below).
+ */
+static void speed_loader_apply_ring_style(lv_obj_t *arc) {
+  lv_arc_set_rotation(arc, 0);
+  lv_arc_set_bg_angles(arc, 180, 360);
+  lv_arc_set_type(arc, LV_ARC_TYPE_NORMAL);
+
+  lv_obj_set_style_local_border_width(arc, LV_ARC_PART_BG, LV_STATE_DEFAULT, 0);
+  lv_obj_set_style_local_pad_left(arc, LV_ARC_PART_BG, LV_STATE_DEFAULT, 0);
+  lv_obj_set_style_local_pad_right(arc, LV_ARC_PART_BG, LV_STATE_DEFAULT, 0);
+  lv_obj_set_style_local_pad_top(arc, LV_ARC_PART_BG, LV_STATE_DEFAULT, 0);
+  lv_obj_set_style_local_pad_bottom(arc, LV_ARC_PART_BG, LV_STATE_DEFAULT, 0);
+  lv_obj_set_style_local_pad_inner(arc, LV_ARC_PART_BG, LV_STATE_DEFAULT, 0);
+
+  lv_obj_set_style_local_line_width(arc, LV_ARC_PART_BG, LV_STATE_DEFAULT, 8);
+  lv_obj_set_style_local_line_color(arc, LV_ARC_PART_BG, LV_STATE_DEFAULT,
+                                    LV_COLOR_MAKE(0xe4, 0xe4, 0xe8));
+  lv_obj_set_style_local_line_width(arc, LV_ARC_PART_INDIC, LV_STATE_DEFAULT, 7);
+  lv_obj_set_style_local_line_color(arc, LV_ARC_PART_INDIC, LV_STATE_DEFAULT,
+                                    LV_COLOR_MAKE(0x00, 0x5a, 0xb8));
+  lv_obj_set_style_local_line_width(arc, LV_ARC_PART_KNOB, LV_STATE_DEFAULT, 0);
+  lv_obj_set_style_local_border_width(arc, LV_ARC_PART_INDIC, LV_STATE_DEFAULT, 0);
+}
+
+static void speed_arc_layout_centered_screen(void) {
+  if (s_speed_arc == NULL) {
+    return;
+  }
+  lv_obj_align(s_speed_arc, lv_scr_act(), LV_ALIGN_CENTER, 0, 0);
+}
+
+static void speed_avg_place_in_arc_opening(void) {
+  if (s_speed_avg_lbl == NULL || s_speed_arc == NULL) {
+    return;
+  }
+  /*
+   * Inside the widget below the drawn ∩ (semicircle is in the upper half). Avoids the indicator
+   * paint covering LV_ALIGN_CENTER, and works with a normal fixed-size label.
+   */
+  lv_obj_align(s_speed_avg_lbl, s_speed_arc, LV_ALIGN_IN_BOTTOM_MID, 0, -6);
+}
+
+static void speed_avg_label_style_result(void) {
+  if (s_speed_avg_lbl == NULL) {
+    return;
+  }
+  lv_label_set_long_mode(s_speed_avg_lbl, LV_LABEL_LONG_BREAK);
+  lv_obj_set_width(s_speed_avg_lbl, LCD_H_RES - 24);
+  lv_label_set_align(s_speed_avg_lbl, LV_LABEL_ALIGN_CENTER);
+  lv_obj_set_style_local_text_color(s_speed_avg_lbl, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT,
+                                    LV_COLOR_BLACK);
+  lv_obj_set_style_local_bg_opa(s_speed_avg_lbl, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT,
+                                LV_OPA_TRANSP);
+  lv_obj_set_style_local_border_width(s_speed_avg_lbl, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, 0);
+#if LV_FONT_MONTSERRAT_16
+  lv_obj_set_style_local_text_font(s_speed_avg_lbl, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT,
+                                   &lv_font_montserrat_16);
+#endif
+}
+
+/** Keep average / PAUSED text above the arc in z-order (arc move_foreground must not run after). */
+static void speed_avg_raise(void) {
+  if (s_speed_avg_lbl) {
+    lv_obj_move_foreground(s_speed_avg_lbl);
+    lv_obj_invalidate(s_speed_avg_lbl);
+  }
+}
+
+static void speed_arc_ensure_visible(void) {
+  if (s_speed_arc) {
+    lv_obj_set_hidden(s_speed_arc, false);
+    speed_arc_layout_centered_screen();
+    lv_obj_move_foreground(s_speed_arc);
+    /* If result/PAUSED is visible, it must stay after the arc in the child list. */
+    if (s_speed_avg_lbl) {
+      const char *t = lv_label_get_text(s_speed_avg_lbl);
+      if (t != NULL && t[0] != '\0') {
+        speed_avg_raise();
+      }
+    }
+  }
+}
+
+typedef struct {
+  int16_t hits;
+  int16_t target;
+} speed_progress_msg_t;
+
+typedef struct {
+  double avg_ms;
+} speed_avg_msg_t;
+
+static void async_speed_ui_hide(void *user_data) {
+  (void)user_data;
+  speed_test_ui_hide_sync();
+}
+
+void display_speed_test_ui_hide(void) {
+  lv_async_call(async_speed_ui_hide, NULL);
+}
+
+static void async_speed_ui_begin(void *user_data) {
+  int *target = (int *)user_data;
+  if (target == NULL || s_speed_arc == NULL) {
+    free(target);
+    return;
+  }
+  const int t = *target;
+  free(target);
+
+  if (s_main_label) {
+    lv_label_set_long_mode(s_main_label, LV_LABEL_LONG_BREAK);
+    lv_obj_set_width(s_main_label, LCD_H_RES - 24);
+    lv_label_set_text(s_main_label, "");
+    lv_obj_set_hidden(s_main_label, true);
+  }
+  if (s_speed_avg_lbl) {
+    lv_label_set_text(s_speed_avg_lbl, "");
+    lv_obj_set_hidden(s_speed_avg_lbl, true);
+  }
+
+  speed_loader_apply_ring_style(s_speed_arc);
+  lv_arc_set_range(s_speed_arc, 0, (int16_t)t);
+  lv_arc_set_value(s_speed_arc, 0);
+  speed_arc_ensure_visible();
+}
+
+void display_speed_test_ui_begin(int target_hits) {
+  if (target_hits <= 0) {
+    return;
+  }
+  int *p = (int *)malloc(sizeof(*p));
+  if (p == NULL) {
+    return;
+  }
+  *p = target_hits;
+  lv_async_call(async_speed_ui_begin, p);
+}
+
+static void async_speed_ui_set_progress(void *user_data) {
+  speed_progress_msg_t *m = (speed_progress_msg_t *)user_data;
+  if (m == NULL || s_speed_arc == NULL) {
+    free(m);
+    return;
+  }
+  if (lv_arc_get_max_value(s_speed_arc) != m->target) {
+    lv_arc_set_range(s_speed_arc, 0, m->target);
+  }
+  int16_t v = m->hits;
+  if (v < 0) {
+    v = 0;
+  }
+  if (v > m->target) {
+    v = m->target;
+  }
+  lv_arc_set_value(s_speed_arc, v);
+  speed_arc_ensure_visible();
+  free(m);
+}
+
+void display_speed_test_ui_set_progress(int hits, int target_hits) {
+  if (target_hits <= 0) {
+    return;
+  }
+  speed_progress_msg_t *m = (speed_progress_msg_t *)malloc(sizeof(*m));
+  if (m == NULL) {
+    return;
+  }
+  m->hits = (int16_t)hits;
+  m->target = (int16_t)target_hits;
+  lv_async_call(async_speed_ui_set_progress, m);
+}
+
+static void async_speed_ui_show_avg(void *user_data) {
+  speed_avg_msg_t *m = (speed_avg_msg_t *)user_data;
+  if (m == NULL) {
+    return;
+  }
+  char buf[32];
+  snprintf(buf, sizeof buf, "%.1f ms", m->avg_ms);
+  free(m);
+
+  if (s_speed_arc == NULL || s_speed_avg_lbl == NULL) {
+    return;
+  }
+  if (s_main_label) {
+    lv_obj_set_hidden(s_main_label, true);
+  }
+  lv_arc_set_value(s_speed_arc, lv_arc_get_max_value(s_speed_arc));
+  speed_arc_ensure_visible();
+
+  speed_avg_label_style_result();
+  lv_label_set_text(s_speed_avg_lbl, buf);
+  lv_obj_set_hidden(s_speed_avg_lbl, false);
+  speed_avg_place_in_arc_opening();
+  lv_obj_move_foreground(s_speed_arc);
+  speed_avg_raise();
+}
+
+void display_speed_test_ui_show_average_ms(double avg_between_ms) {
+  speed_avg_msg_t *m = (speed_avg_msg_t *)malloc(sizeof(*m));
+  if (m == NULL) {
+    return;
+  }
+  m->avg_ms = avg_between_ms;
+  lv_async_call(async_speed_ui_show_avg, m);
+}
+
+static void async_speed_ui_set_paused(void *user_data) {
+  const bool paused = ((uintptr_t)user_data) != 0;
+  if (s_speed_arc == NULL || s_speed_avg_lbl == NULL) {
+    return;
+  }
+  speed_arc_ensure_visible();
+  if (paused) {
+    speed_avg_label_style_result();
+    lv_label_set_text(s_speed_avg_lbl, "PAUSED");
+    lv_obj_set_hidden(s_speed_avg_lbl, false);
+    speed_avg_place_in_arc_opening();
+    lv_obj_move_foreground(s_speed_arc);
+    speed_avg_raise();
+  } else {
+    lv_label_set_text(s_speed_avg_lbl, "");
+    lv_obj_set_hidden(s_speed_avg_lbl, true);
+  }
+}
+
+void display_speed_test_ui_set_paused(bool paused) {
+  lv_async_call(async_speed_ui_set_paused, (void *)(uintptr_t)(paused ? 1u : 0));
+}
+
+#else /* !LV_USE_ARC */
+
+void display_speed_test_ui_hide(void) {}
+
+void display_speed_test_ui_begin(int target_hits) {
+  (void)target_hits;
+}
+
+void display_speed_test_ui_set_progress(int hits, int target_hits) {
+  (void)hits;
+  (void)target_hits;
+}
+
+void display_speed_test_ui_show_average_ms(double avg_between_ms) {
+  (void)avg_between_ms;
+}
+
+void display_speed_test_ui_set_paused(bool paused) { (void)paused; }
+
+#endif /* LV_USE_ARC */
 
 static bool lvgl_on_flush_done(esp_lcd_panel_io_handle_t panel_io,
                                esp_lcd_panel_io_event_data_t *edata, void *user_ctx) {
@@ -557,6 +833,29 @@ void display_setup(void) {
   lv_obj_set_width(s_main_label, LCD_H_RES - 24);
   lv_label_set_text(s_main_label, "");
   lv_obj_align(s_main_label, NULL, LV_ALIGN_CENTER, 0, 0);
+
+#if defined(LV_USE_ARC) && LV_USE_ARC
+  s_speed_arc = lv_arc_create(scr, NULL);
+  /* Large semicircle, horizontally centered with full-width top bar (OUT_BOTTOM_MID). */
+  lv_obj_set_size(s_speed_arc, 252, 86);
+  lv_arc_set_range(s_speed_arc, 0, APP_SPEED_TARGET_HITS);
+  lv_arc_set_value(s_speed_arc, 0);
+  lv_arc_set_adjustable(s_speed_arc, false);
+  lv_obj_set_click(s_speed_arc, false);
+  speed_loader_apply_ring_style(s_speed_arc);
+  lv_obj_align(s_speed_arc, lv_scr_act(), LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_hidden(s_speed_arc, true);
+
+  /*
+   * Sibling on screen (not child of arc): LVGL 7 draws the arc on top of arc children, which hid
+   * the result. Align to arc center and move_foreground so text paints above the ring.
+   */
+  s_speed_avg_lbl = lv_label_create(scr, NULL);
+  lv_label_set_text(s_speed_avg_lbl, "");
+  speed_avg_label_style_result();
+  speed_avg_place_in_arc_opening();
+  lv_obj_set_hidden(s_speed_avg_lbl, true);
+#endif
 
   s_menu_bg_img = lv_img_create(scr, NULL);
   lv_img_set_src(s_menu_bg_img, &walker_splash);

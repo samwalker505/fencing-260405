@@ -11,6 +11,7 @@ static void menu_paint(const app_context_t *ctx) {
 }
 
 void screen_menu_on_enter(app_context_t *ctx) {
+  display_speed_test_ui_hide();
   display_restore_standard_look();
   display_set_menu_look(true);
   display_set_title("");

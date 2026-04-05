@@ -34,3 +34,20 @@ void display_set_button_chrome(bool top_visible, const char *top_caption,
  * Training feedback: released → white bg, black "Ready"; pressed → red bg, white "HIT!".
  */
 void display_set_training_view(bool hit_active);
+
+/** Hide speed-test arc + average label (menu, training, or after restore). */
+void display_speed_test_ui_hide(void);
+
+/**
+ * Speed test: show arc, range 0..target, value 0, clear center status text.
+ * Uses LVGL 7 `lv_arc` (value + background angles), not LVGL 9 APIs.
+ */
+void display_speed_test_ui_begin(int target_hits);
+
+void display_speed_test_ui_set_progress(int hits, int target_hits);
+
+/** Full arc + `%.1f ms` centered inside the ring (no separate overlay label). */
+void display_speed_test_ui_show_average_ms(double avg_between_ms);
+
+/** Paused: show "PAUSED" centered inside the ring (same label as the result, not s_main_label). */
+void display_speed_test_ui_set_paused(bool paused);

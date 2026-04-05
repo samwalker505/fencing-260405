@@ -14,26 +14,24 @@ static void session_reset(app_context_t *ctx) {
 static void session_start_fresh(app_context_t *ctx) {
   session_reset(ctx);
   ctx->speed_phase = APP_SPEED_RUNNING;
-  display_set_title("Speed test");
-  char msg[96];
-  snprintf(msg, sizeof msg, "Hits 0/%d", APP_SPEED_TARGET_HITS);
-  display_set_main_message(msg);
+  display_set_title("");
+  display_speed_test_ui_begin(APP_SPEED_TARGET_HITS);
   printf("speed test start\n");
 }
 
 void screen_speed_test_on_enter(app_context_t *ctx) {
   display_restore_standard_look();
   display_set_menu_look(false);
-  display_set_title_visible(true);
+  display_set_title_visible(false);
   display_set_button_chrome(true, "Speed Test Mode", "next");
   session_start_fresh(ctx);
 }
 
 app_screen_t screen_speed_test_update(app_context_t *ctx, const app_input_t *in) {
   const int intervals_needed = APP_SPEED_TARGET_HITS - 1;
-  char msg[96];
 
   if (in->go_press) {
+    display_speed_test_ui_set_paused(false);
     session_start_fresh(ctx);
     return APP_SCREEN_SPEED_TEST;
   }
@@ -44,12 +42,11 @@ app_screen_t screen_speed_test_update(app_context_t *ctx, const app_input_t *in)
     }
     if (ctx->speed_phase == APP_SPEED_RUNNING) {
       ctx->speed_phase = APP_SPEED_PAUSED;
-      display_set_main_message("PAUSED");
+      display_speed_test_ui_set_paused(true);
       printf("pause\n");
     } else if (ctx->speed_phase == APP_SPEED_PAUSED) {
       ctx->speed_phase = APP_SPEED_RUNNING;
-      snprintf(msg, sizeof msg, "Hits %d/%d", ctx->n_hits, APP_SPEED_TARGET_HITS);
-      display_set_main_message(msg);
+      display_speed_test_ui_set_paused(false);
       printf("resume\n");
     }
     return APP_SCREEN_SPEED_TEST;
@@ -64,8 +61,7 @@ app_screen_t screen_speed_test_update(app_context_t *ctx, const app_input_t *in)
   if (ctx->n_hits == 0) {
     ctx->last_hit_us = now;
     ctx->n_hits = 1;
-    snprintf(msg, sizeof msg, "Hits %d/%d", ctx->n_hits, APP_SPEED_TARGET_HITS);
-    display_set_main_message(msg);
+    display_speed_test_ui_set_progress(ctx->n_hits, APP_SPEED_TARGET_HITS);
     return APP_SCREEN_SPEED_TEST;
   }
 
@@ -74,15 +70,16 @@ app_screen_t screen_speed_test_update(app_context_t *ctx, const app_input_t *in)
   ctx->n_hits++;
 
   if (ctx->n_hits < APP_SPEED_TARGET_HITS) {
-    snprintf(msg, sizeof msg, "Hits %d/%d", ctx->n_hits, APP_SPEED_TARGET_HITS);
-    display_set_main_message(msg);
+    display_speed_test_ui_set_progress(ctx->n_hits, APP_SPEED_TARGET_HITS);
     return APP_SCREEN_SPEED_TEST;
   }
 
   double avg_between_ms =
       (ctx->sum_inter_hit_us / (double)intervals_needed) / 1000.0;
-  snprintf(msg, sizeof msg, "Done\nAvg between hits:\n%.1f ms", avg_between_ms);
-  display_set_main_message(msg);
+  if (ctx->speed_phase == APP_SPEED_PAUSED) {
+    display_speed_test_ui_set_paused(false);
+  }
+  display_speed_test_ui_show_average_ms(avg_between_ms);
   printf("avg_between_hits_ms=%.2f\n", avg_between_ms);
   ctx->speed_phase = APP_SPEED_DONE;
 

@@ -10,6 +10,7 @@ void screen_training_on_enter(app_context_t *ctx, const app_input_t *in) {
   s_show_hit = (in != NULL && in->fencing_level != 0);
 
   display_set_main_message("");
+  display_speed_test_ui_hide();
   display_restore_standard_look();
   display_set_menu_look(false);
   display_set_title_visible(false);
