@@ -1,0 +1,4 @@
+# LilyGO T-Display S3 (ESP32-S3, parallel I80 ST7789, 320x170 landscape).
+#   idf.py set-target esp32s3 fullclean build
+CONFIG_LV_HOR_RES_MAX=320
+CONFIG_LV_VER_RES_MAX=170
