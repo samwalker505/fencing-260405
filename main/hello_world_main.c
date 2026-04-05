@@ -9,11 +9,13 @@
 #include "display_setup.h"
 #include "screen_menu.h"
 #include "screen_speed_test.h"
+#include "screen_training.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-static void app_transition(app_context_t *ctx, app_screen_t to) {
+static void app_transition(app_context_t *ctx, app_screen_t to,
+                           const app_input_t *in) {
   ctx->screen = to;
   switch (to) {
   case APP_SCREEN_MENU:
@@ -21,6 +23,9 @@ static void app_transition(app_context_t *ctx, app_screen_t to) {
     break;
   case APP_SCREEN_SPEED_TEST:
     screen_speed_test_on_enter(ctx);
+    break;
+  case APP_SCREEN_TRAINING:
+    screen_training_on_enter(ctx, in);
     break;
   }
 }
@@ -40,7 +45,7 @@ void app_main(void) {
   int prev_fp = 0;
 
   app_hw_init();
-  app_transition(&ctx, APP_SCREEN_MENU);
+  app_transition(&ctx, APP_SCREEN_MENU, NULL);
 
   app_input_t in;
 
@@ -55,10 +60,13 @@ void app_main(void) {
     case APP_SCREEN_SPEED_TEST:
       next = screen_speed_test_update(&ctx, &in);
       break;
+    case APP_SCREEN_TRAINING:
+      next = screen_training_update(&ctx, &in);
+      break;
     }
 
     if (next != ctx.screen) {
-      app_transition(&ctx, next);
+      app_transition(&ctx, next, &in);
     }
 
     vTaskDelay(pdMS_TO_TICKS(10));

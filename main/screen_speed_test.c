@@ -22,7 +22,10 @@ static void session_start_fresh(app_context_t *ctx) {
 }
 
 void screen_speed_test_on_enter(app_context_t *ctx) {
+  display_restore_standard_look();
   display_set_menu_look(false);
+  display_set_title_visible(true);
+  display_set_button_chrome(true, "Speed Test Mode", "next");
   session_start_fresh(ctx);
 }
 

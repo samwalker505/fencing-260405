@@ -5,12 +5,14 @@
 typedef enum {
   APP_SCREEN_MENU = 0,
   APP_SCREEN_SPEED_TEST,
+  APP_SCREEN_TRAINING,
 } app_screen_t;
 
 /* Menu row index (extend when adding modes). */
 typedef enum {
   APP_MENU_MODE_SPEED_TEST = 0,
-  APP_MENU_MODE_COUNT = 1,
+  APP_MENU_MODE_TRAINING,
+  APP_MENU_MODE_COUNT,
 } app_menu_mode_t;
 
 typedef enum {

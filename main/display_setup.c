@@ -89,6 +89,8 @@ static lv_obj_t *s_title_label;
 static lv_obj_t *s_menu_bg_img;
 static lv_obj_t *s_vis_btn_top;
 static lv_obj_t *s_vis_btn_bottom;
+static lv_obj_t *s_vis_btn_top_lbl;
+static lv_obj_t *s_vis_btn_bottom_lbl;
 
 static bool s_have_hw_vis;
 static bool s_last_hw_top;
@@ -99,6 +101,8 @@ static void async_main_message(void *user_data) {
 #if SOC_LCD_I80_SUPPORTED
   char *copy = (char *)user_data;
   if (s_main_label && copy) {
+    lv_label_set_long_mode(s_main_label, LV_LABEL_LONG_BREAK);
+    lv_obj_set_width(s_main_label, LCD_H_RES - 24);
     lv_label_set_text(s_main_label, copy);
   }
   free(copy);
@@ -198,7 +202,10 @@ static void async_menu_look(void *user_data) {
     }
   }
   if (s_title_label) {
-    lv_obj_set_hidden(s_title_label, on);
+    if (on) {
+      lv_obj_set_hidden(s_title_label, true);
+    }
+    /* Leaving menu: do not unhide title (Training keeps it off; Speed turns it on). */
   }
   if (s_main_label) {
     if (on) {
@@ -220,6 +227,144 @@ void display_set_menu_look(bool menu_active) {
   lv_async_call(async_menu_look, m);
 #else
   (void)menu_active;
+#endif
+}
+
+static void async_title_visible(void *user_data) {
+#if SOC_LCD_I80_SUPPORTED
+  bool vis = ((uintptr_t)user_data) != 0;
+  if (s_title_label) {
+    lv_obj_set_hidden(s_title_label, !vis);
+  }
+#endif
+}
+
+void display_set_title_visible(bool visible) {
+#if SOC_LCD_I80_SUPPORTED
+  lv_async_call(async_title_visible, (void *)(uintptr_t)(visible ? 1u : 0));
+#else
+  (void)visible;
+#endif
+}
+
+static void async_restore_standard(void *user_data) {
+  (void)user_data;
+#if SOC_LCD_I80_SUPPORTED
+  lv_obj_t *scr = lv_scr_act();
+  lv_obj_set_style_local_bg_color(scr, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE);
+  lv_obj_set_style_local_bg_opa(scr, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_COVER);
+  if (s_main_label) {
+    lv_label_set_long_mode(s_main_label, LV_LABEL_LONG_BREAK);
+    lv_obj_set_width(s_main_label, LCD_H_RES - 24);
+    lv_obj_set_style_local_text_color(s_main_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT,
+                                      LV_COLOR_BLACK);
+#if LV_FONT_MONTSERRAT_16
+    lv_obj_set_style_local_text_font(s_main_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT,
+                                     &lv_font_montserrat_16);
+#endif
+    lv_obj_align(s_main_label, NULL, LV_ALIGN_CENTER, 0, 0);
+  }
+#endif
+}
+
+void display_restore_standard_look(void) {
+#if SOC_LCD_I80_SUPPORTED
+  lv_async_call(async_restore_standard, NULL);
+#endif
+}
+
+typedef struct {
+  bool top_visible;
+  char top[48];
+  char bottom[16];
+} chrome_msg_t;
+
+static void async_button_chrome(void *user_data) {
+#if SOC_LCD_I80_SUPPORTED
+  chrome_msg_t *m = (chrome_msg_t *)user_data;
+  if (m == NULL) {
+    return;
+  }
+  if (s_vis_btn_top) {
+    lv_obj_set_hidden(s_vis_btn_top, !m->top_visible);
+  }
+  if (s_vis_btn_top_lbl) {
+    lv_label_set_text(s_vis_btn_top_lbl, m->top);
+  }
+  if (s_vis_btn_bottom_lbl) {
+    lv_label_set_text(s_vis_btn_bottom_lbl, m->bottom);
+  }
+  free(m);
+#endif
+}
+
+void display_set_button_chrome(bool top_visible, const char *top_caption,
+                               const char *bottom_caption) {
+#if SOC_LCD_I80_SUPPORTED
+  chrome_msg_t *m = (chrome_msg_t *)malloc(sizeof(*m));
+  if (m == NULL) {
+    return;
+  }
+  m->top_visible = top_visible;
+  snprintf(m->top, sizeof m->top, "%s", top_caption ? top_caption : "");
+  snprintf(m->bottom, sizeof m->bottom, "%s", bottom_caption ? bottom_caption : "");
+  lv_async_call(async_button_chrome, m);
+#else
+  (void)top_visible;
+  (void)top_caption;
+  (void)bottom_caption;
+#endif
+}
+
+static void async_training_view(void *user_data) {
+#if SOC_LCD_I80_SUPPORTED
+  const bool hit = ((uintptr_t)user_data) != 0;
+  lv_obj_t *scr = lv_scr_act();
+  if (s_title_label) {
+    lv_obj_set_hidden(s_title_label, true);
+  }
+  if (hit) {
+    lv_obj_set_style_local_bg_color(scr, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_RED);
+    lv_obj_set_style_local_bg_opa(scr, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_COVER);
+    if (s_main_label) {
+      lv_label_set_long_mode(s_main_label, LV_LABEL_LONG_EXPAND);
+      lv_obj_set_style_local_text_color(s_main_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT,
+                                        LV_COLOR_WHITE);
+#if LV_FONT_MONTSERRAT_40
+      lv_obj_set_style_local_text_font(s_main_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT,
+                                       &lv_font_montserrat_40);
+#elif LV_FONT_MONTSERRAT_28
+      lv_obj_set_style_local_text_font(s_main_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT,
+                                       &lv_font_montserrat_28);
+#endif
+      lv_label_set_text(s_main_label, "HIT!");
+      lv_label_set_align(s_main_label, LV_LABEL_ALIGN_CENTER);
+      lv_obj_align(s_main_label, NULL, LV_ALIGN_CENTER, 0, 0);
+    }
+  } else {
+    lv_obj_set_style_local_bg_color(scr, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE);
+    lv_obj_set_style_local_bg_opa(scr, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_COVER);
+    if (s_main_label) {
+      lv_label_set_long_mode(s_main_label, LV_LABEL_LONG_BREAK);
+      lv_obj_set_width(s_main_label, LCD_H_RES - 24);
+      lv_label_set_text(s_main_label, "Ready");
+      lv_obj_set_style_local_text_color(s_main_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT,
+                                        LV_COLOR_BLACK);
+#if LV_FONT_MONTSERRAT_16
+      lv_obj_set_style_local_text_font(s_main_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT,
+                                       &lv_font_montserrat_16);
+#endif
+      lv_obj_align(s_main_label, NULL, LV_ALIGN_CENTER, 0, 0);
+    }
+  }
+#endif
+}
+
+void display_set_training_view(bool hit_active) {
+#if SOC_LCD_I80_SUPPORTED
+  lv_async_call(async_training_view, (void *)(uintptr_t)(hit_active ? 1u : 0));
+#else
+  (void)hit_active;
 #endif
 }
 
@@ -396,14 +541,16 @@ void display_setup(void) {
   lv_label_set_align(lt, LV_LABEL_ALIGN_CENTER);
   lv_label_set_text(lt, "Speed Test Mode");
   lv_obj_align(lt, NULL, LV_ALIGN_CENTER, 0, 0);
+  s_vis_btn_top_lbl = lt;
 
   s_vis_btn_bottom = lv_btn_create(scr, NULL);
   lv_obj_set_size(s_vis_btn_bottom, bw_bot, bh_bot);
   lv_obj_align(s_vis_btn_bottom, NULL, LV_ALIGN_IN_BOTTOM_LEFT, pad, -pad);
   lv_obj_set_click(s_vis_btn_bottom, false);
   lv_obj_t *lb = lv_label_create(s_vis_btn_bottom, NULL);
-  lv_label_set_text(lb, "||");
+  lv_label_set_text(lb, "next");
   lv_obj_align(lb, NULL, LV_ALIGN_CENTER, 0, 0);
+  s_vis_btn_bottom_lbl = lb;
 
   s_main_label = lv_label_create(scr, NULL);
   lv_label_set_long_mode(s_main_label, LV_LABEL_LONG_BREAK);
