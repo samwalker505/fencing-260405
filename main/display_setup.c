@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "driver/gpio.h"
 #include "esp_err.h"
@@ -82,28 +83,70 @@ static esp_lcd_panel_io_handle_t s_io;
 static lv_disp_drv_t s_disp_drv;
 
 #if SOC_LCD_I80_SUPPORTED
-static lv_obj_t *s_count_label;
+static lv_obj_t *s_main_label;
+static lv_obj_t *s_vis_btn_top;
+static lv_obj_t *s_vis_btn_bottom;
+
+static bool s_have_hw_vis;
+static bool s_last_hw_top;
+static bool s_last_hw_bottom;
 #endif
 
-static void async_set_count_text(void *user_data) {
+static void async_main_message(void *user_data) {
 #if SOC_LCD_I80_SUPPORTED
-  int c = (int)(intptr_t)user_data;
-  char buf[48];
-  snprintf(buf, sizeof buf, "Presses: %d", c);
-  if (s_count_label) {
-    lv_label_set_text(s_count_label, buf);
+  char *copy = (char *)user_data;
+  if (s_main_label && copy) {
+    lv_label_set_text(s_main_label, copy);
   }
+  free(copy);
 #endif
 }
 
-void display_set_pressed_count(int count) {
+void display_set_main_message(const char *msg) {
 #if SOC_LCD_I80_SUPPORTED
-  if (s_count_label == NULL) {
+  if (s_main_label == NULL || msg == NULL) {
     return;
   }
-  lv_async_call(async_set_count_text, (void *)(intptr_t)count);
+  size_t n = strlen(msg) + 1;
+  char *copy = (char *)malloc(n);
+  if (copy == NULL) {
+    return;
+  }
+  memcpy(copy, msg, n);
+  lv_async_call(async_main_message, copy);
+#endif
+}
+
+#if SOC_LCD_I80_SUPPORTED
+static void async_hw_btn_visual(void *user_data) {
+  uintptr_t v = (uintptr_t)user_data;
+  bool top = (v & 1u) != 0;
+  bool bottom = (v & 2u) != 0;
+  if (s_vis_btn_top) {
+    lv_btn_set_state(s_vis_btn_top, top ? LV_BTN_STATE_PRESSED : LV_BTN_STATE_RELEASED);
+  }
+  if (s_vis_btn_bottom) {
+    lv_btn_set_state(s_vis_btn_bottom, bottom ? LV_BTN_STATE_PRESSED : LV_BTN_STATE_RELEASED);
+  }
+}
+#endif
+
+void display_set_hw_buttons_visual(bool top_pressed, bool bottom_pressed) {
+#if SOC_LCD_I80_SUPPORTED
+  if (s_vis_btn_top == NULL || s_vis_btn_bottom == NULL) {
+    return;
+  }
+  if (s_have_hw_vis && top_pressed == s_last_hw_top && bottom_pressed == s_last_hw_bottom) {
+    return;
+  }
+  s_have_hw_vis = true;
+  s_last_hw_top = top_pressed;
+  s_last_hw_bottom = bottom_pressed;
+  uintptr_t v = (top_pressed ? 1u : 0u) | (bottom_pressed ? 2u : 0u);
+  lv_async_call(async_hw_btn_visual, (void *)v);
 #else
-  (void)count;
+  (void)top_pressed;
+  (void)bottom_pressed;
 #endif
 }
 
@@ -256,12 +299,35 @@ void display_setup(void) {
   ESP_ERROR_CHECK(esp_timer_start_periodic(tick, (int64_t)LVGL_TICK_MS * 1000));
 
   lv_obj_t *title = lv_label_create(lv_scr_act(), NULL);
-  lv_label_set_text(title, "Button");
-  lv_obj_align(title, NULL, LV_ALIGN_IN_TOP_MID, 0, 8);
+  lv_label_set_text(title, "Fencing: 10 hits -> avg interval");
+  lv_obj_align(title, NULL, LV_ALIGN_IN_TOP_MID, 0, 36);
 
-  s_count_label = lv_label_create(lv_scr_act(), NULL);
-  lv_label_set_text(s_count_label, "Presses: 0");
-  lv_obj_align(s_count_label, NULL, LV_ALIGN_CENTER, 0, 0);
+  /* On-screen controls aligned with physical buttons (left edge, top / bottom). */
+  const lv_coord_t pad = 6;
+  const lv_coord_t bw = 52;
+  const lv_coord_t bh = 30;
+
+  s_vis_btn_top = lv_btn_create(lv_scr_act(), NULL);
+  lv_obj_set_size(s_vis_btn_top, bw, bh);
+  lv_obj_align(s_vis_btn_top, NULL, LV_ALIGN_IN_TOP_LEFT, pad, pad);
+  lv_obj_set_click(s_vis_btn_top, false);
+  lv_obj_t *lt = lv_label_create(s_vis_btn_top, NULL);
+  lv_label_set_text(lt, "GO");
+  lv_obj_align(lt, NULL, LV_ALIGN_CENTER, 0, 0);
+
+  s_vis_btn_bottom = lv_btn_create(lv_scr_act(), NULL);
+  lv_obj_set_size(s_vis_btn_bottom, bw, bh);
+  lv_obj_align(s_vis_btn_bottom, NULL, LV_ALIGN_IN_BOTTOM_LEFT, pad, -pad);
+  lv_obj_set_click(s_vis_btn_bottom, false);
+  lv_obj_t *lb = lv_label_create(s_vis_btn_bottom, NULL);
+  lv_label_set_text(lb, "||");
+  lv_obj_align(lb, NULL, LV_ALIGN_CENTER, 0, 0);
+
+  s_main_label = lv_label_create(lv_scr_act(), NULL);
+  lv_label_set_long_mode(s_main_label, LV_LABEL_LONG_BREAK);
+  lv_obj_set_width(s_main_label, LCD_H_RES - 24);
+  lv_label_set_text(s_main_label, "Top: START");
+  lv_obj_align(s_main_label, NULL, LV_ALIGN_CENTER, 0, 0);
 
   xTaskCreate(lvgl_port_task, "lvgl", LVGL_TASK_STACK, NULL, LVGL_TASK_PRIO, NULL);
   ESP_LOGI(TAG, "T-Display S3 (I80 ST7789) ready %dx%d", LCD_H_RES, LCD_V_RES);
