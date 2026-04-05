@@ -1,4 +1,5 @@
 #include "display_setup.h"
+#include "walker_splash.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -84,6 +85,8 @@ static lv_disp_drv_t s_disp_drv;
 
 #if SOC_LCD_I80_SUPPORTED
 static lv_obj_t *s_main_label;
+static lv_obj_t *s_title_label;
+static lv_obj_t *s_menu_bg_img;
 static lv_obj_t *s_vis_btn_top;
 static lv_obj_t *s_vis_btn_bottom;
 
@@ -117,6 +120,31 @@ void display_set_main_message(const char *msg) {
 #endif
 }
 
+static void async_title_message(void *user_data) {
+#if SOC_LCD_I80_SUPPORTED
+  char *copy = (char *)user_data;
+  if (s_title_label && copy) {
+    lv_label_set_text(s_title_label, copy);
+  }
+  free(copy);
+#endif
+}
+
+void display_set_title(const char *msg) {
+#if SOC_LCD_I80_SUPPORTED
+  if (s_title_label == NULL || msg == NULL) {
+    return;
+  }
+  size_t n = strlen(msg) + 1;
+  char *copy = (char *)malloc(n);
+  if (copy == NULL) {
+    return;
+  }
+  memcpy(copy, msg, n);
+  lv_async_call(async_title_message, copy);
+#endif
+}
+
 #if SOC_LCD_I80_SUPPORTED
 static void async_hw_btn_visual(void *user_data) {
   uintptr_t v = (uintptr_t)user_data;
@@ -147,6 +175,51 @@ void display_set_hw_buttons_visual(bool top_pressed, bool bottom_pressed) {
 #else
   (void)top_pressed;
   (void)bottom_pressed;
+#endif
+}
+
+typedef struct {
+  bool menu_active;
+} menu_look_msg_t;
+
+static void async_menu_look(void *user_data) {
+#if SOC_LCD_I80_SUPPORTED
+  menu_look_msg_t *m = (menu_look_msg_t *)user_data;
+  if (m == NULL) {
+    return;
+  }
+  const bool on = m->menu_active;
+  free(m);
+
+  if (s_menu_bg_img) {
+    lv_obj_set_hidden(s_menu_bg_img, !on);
+    if (on) {
+      lv_obj_move_background(s_menu_bg_img);
+    }
+  }
+  if (s_title_label) {
+    lv_obj_set_hidden(s_title_label, on);
+  }
+  if (s_main_label) {
+    if (on) {
+      lv_obj_align(s_main_label, NULL, LV_ALIGN_IN_BOTTOM_MID, 0, -38);
+    } else {
+      lv_obj_align(s_main_label, NULL, LV_ALIGN_CENTER, 0, 0);
+    }
+  }
+#endif
+}
+
+void display_set_menu_look(bool menu_active) {
+#if SOC_LCD_I80_SUPPORTED
+  menu_look_msg_t *m = (menu_look_msg_t *)malloc(sizeof(*m));
+  if (m == NULL) {
+    return;
+  }
+  m->menu_active = menu_active;
+  lv_async_call(async_menu_look, m);
+#else
+  (void)menu_active;
 #endif
 }
 
@@ -298,36 +371,52 @@ void display_setup(void) {
   ESP_ERROR_CHECK(esp_timer_create(&tick_args, &tick));
   ESP_ERROR_CHECK(esp_timer_start_periodic(tick, (int64_t)LVGL_TICK_MS * 1000));
 
-  lv_obj_t *title = lv_label_create(lv_scr_act(), NULL);
-  lv_label_set_text(title, "Fencing: 10 hits -> avg interval");
-  lv_obj_align(title, NULL, LV_ALIGN_IN_TOP_MID, 0, 36);
+  lv_obj_t *scr = lv_scr_act();
+  lv_obj_set_style_local_bg_color(scr, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE);
+  lv_obj_set_style_local_bg_opa(scr, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_COVER);
+
+  s_title_label = lv_label_create(scr, NULL);
+  lv_label_set_text(s_title_label, "");
+  lv_obj_align(s_title_label, NULL, LV_ALIGN_IN_TOP_MID, 0, 36);
 
   /* On-screen controls aligned with physical buttons (left edge, top / bottom). */
   const lv_coord_t pad = 6;
-  const lv_coord_t bw = 52;
-  const lv_coord_t bh = 30;
+  const lv_coord_t bw_top = LCD_H_RES - 2 * pad;
+  const lv_coord_t bh_top = 34;
+  const lv_coord_t bw_bot = 52;
+  const lv_coord_t bh_bot = 30;
 
-  s_vis_btn_top = lv_btn_create(lv_scr_act(), NULL);
-  lv_obj_set_size(s_vis_btn_top, bw, bh);
+  s_vis_btn_top = lv_btn_create(scr, NULL);
+  lv_obj_set_size(s_vis_btn_top, bw_top, bh_top);
   lv_obj_align(s_vis_btn_top, NULL, LV_ALIGN_IN_TOP_LEFT, pad, pad);
   lv_obj_set_click(s_vis_btn_top, false);
   lv_obj_t *lt = lv_label_create(s_vis_btn_top, NULL);
-  lv_label_set_text(lt, "GO");
+  lv_label_set_long_mode(lt, LV_LABEL_LONG_BREAK);
+  lv_obj_set_width(lt, bw_top - 10);
+  lv_label_set_align(lt, LV_LABEL_ALIGN_CENTER);
+  lv_label_set_text(lt, "Speed Test Mode");
   lv_obj_align(lt, NULL, LV_ALIGN_CENTER, 0, 0);
 
-  s_vis_btn_bottom = lv_btn_create(lv_scr_act(), NULL);
-  lv_obj_set_size(s_vis_btn_bottom, bw, bh);
+  s_vis_btn_bottom = lv_btn_create(scr, NULL);
+  lv_obj_set_size(s_vis_btn_bottom, bw_bot, bh_bot);
   lv_obj_align(s_vis_btn_bottom, NULL, LV_ALIGN_IN_BOTTOM_LEFT, pad, -pad);
   lv_obj_set_click(s_vis_btn_bottom, false);
   lv_obj_t *lb = lv_label_create(s_vis_btn_bottom, NULL);
   lv_label_set_text(lb, "||");
   lv_obj_align(lb, NULL, LV_ALIGN_CENTER, 0, 0);
 
-  s_main_label = lv_label_create(lv_scr_act(), NULL);
+  s_main_label = lv_label_create(scr, NULL);
   lv_label_set_long_mode(s_main_label, LV_LABEL_LONG_BREAK);
   lv_obj_set_width(s_main_label, LCD_H_RES - 24);
-  lv_label_set_text(s_main_label, "Top: START");
+  lv_label_set_text(s_main_label, "");
   lv_obj_align(s_main_label, NULL, LV_ALIGN_CENTER, 0, 0);
+
+  s_menu_bg_img = lv_img_create(scr, NULL);
+  lv_img_set_src(s_menu_bg_img, &walker_splash);
+  /* Below full-width top bar so the monogram stays visible */
+  lv_obj_align(s_menu_bg_img, NULL, LV_ALIGN_CENTER, 0, 20);
+  lv_obj_set_hidden(s_menu_bg_img, true);
+  lv_obj_move_background(s_menu_bg_img);
 
   xTaskCreate(lvgl_port_task, "lvgl", LVGL_TASK_STACK, NULL, LVGL_TASK_PRIO, NULL);
   ESP_LOGI(TAG, "T-Display S3 (I80 ST7789) ready %dx%d", LCD_H_RES, LCD_V_RES);
